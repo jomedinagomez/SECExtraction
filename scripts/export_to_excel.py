@@ -131,8 +131,33 @@ def _normalize_table(raw_tbl: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError):
             level = 0
 
-        is_header = bool(_scalar(row_obj.get("isSectionHeader"), False))
-        is_subtotal = bool(_scalar(row_obj.get("isSubtotal"), False))
+        # v1 provides these fields directly; v2 returns "true"/"false" strings
+        if "isSectionHeader" in row_obj:
+            _hdr_val = _scalar(row_obj.get("isSectionHeader"), False)
+            is_header = str(_hdr_val).lower().strip() == "true" if isinstance(_hdr_val, str) else bool(_hdr_val)
+        else:
+            # Section headers: level 0, label ends with ":" or has no values
+            all_empty = all(
+                not str(_scalar(v)).strip() or str(_scalar(v)).strip() == "—"
+                for v in _array(row_obj.get("values"))
+            )
+            is_header = level == 0 and (line_item.rstrip().endswith(":") or all_empty)
+
+        if "isSubtotal" in row_obj:
+            _sub_val = _scalar(row_obj.get("isSubtotal"), False)
+            is_subtotal = str(_sub_val).lower().strip() == "true" if isinstance(_sub_val, str) else bool(_sub_val)
+        else:
+            # Subtotals: level 0 labels starting with Total/Net/Balance
+            _li_lower = line_item.lower().lstrip()
+            is_subtotal = level == 0 and (
+                _li_lower.startswith("total ")
+                or _li_lower.startswith("net ")
+                or _li_lower.startswith("balance,")
+                or _li_lower.startswith("balance at")
+                or _li_lower.startswith("balance as")
+                or _li_lower == "total"
+            )
+
         parent = str(_scalar(row_obj.get("parentLineItem"))).strip()
 
         if "value1" in row_obj:

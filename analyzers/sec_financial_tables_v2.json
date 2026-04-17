@@ -1,0 +1,111 @@
+{
+  "description": "Extracts the five primary SEC consolidated financial statements (Balance Sheet, Income, Comprehensive Income, Equity, Cash Flows) preserving hierarchy. Handles multi-page tables by merging continuations into a single table. Excludes MD&A, FFO/NOI, rent rolls, debt schedules, and notes tables. CRITICAL: Every row MUST have a non-empty lineItem extracted from the first column.",
+  "baseAnalyzerId": "prebuilt-document",
+  "config": {
+    "returnDetails": true,
+    "enableLayout": true,
+    "estimateFieldSourceAndConfidence": true
+  },
+  "fieldSchema": {
+    "name": "SEC Financial Tables v2",
+    "fields": {
+      "financialTables": {
+        "type": "array",
+        "description": "Primary consolidated financial statement tables only. INCLUDE: Balance Sheet, Income Statement, Comprehensive Income, Equity Changes, Cash Flows. EXCLUDE: MD&A tables, FFO/NOI, rent rolls, debt schedules, segment breakdowns, notes tables. MULTI-PAGE: Merge all continuation pages into ONE table — concatenate data rows, ignore repeated headers. NEVER truncate. BALANCE SHEET: 'Stockholders equity' sections within a Balance Sheet are part of it, not separate Equity statements.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "tableTitle": {
+              "type": "string",
+              "method": "extract",
+              "description": "Exact title/caption printed above the table, verbatim."
+            },
+            "companyName": {
+              "type": "string",
+              "method": "extract",
+              "description": "Registrant name as printed above the table."
+            },
+            "statementType": {
+              "type": "string",
+              "method": "classify",
+              "description": "CashFlow, BalanceSheet, IncomeStatement, ComprehensiveIncome, Equity, or Other.",
+              "enum": [
+                "CashFlow",
+                "BalanceSheet",
+                "IncomeStatement",
+                "ComprehensiveIncome",
+                "Equity",
+                "Other"
+              ]
+            },
+            "unit": {
+              "type": "string",
+              "method": "extract",
+              "description": "Reporting unit as printed (e.g. 'thousands', 'millions')."
+            },
+            "periodHeaders": {
+              "type": "array",
+              "method": "extract",
+              "description": "LEAF column headers in physical left-to-right order. One entry per value column. Do NOT include the line-item label column. When grouped headers exist, leaves under the LEFTMOST group come first. For Equity / Stockholders' Equity statements: column headers are account categories (e.g. 'Number of Shares', 'Amount', 'Additional Paid-in Capital', 'Retained Earnings', 'Total') — NOT time periods. Read the physical column header cells in the <th> row.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "periodGroupHeaders": {
+              "type": "array",
+              "method": "extract",
+              "description": "Spanning group header for each leaf column, same order as periodHeaders[]. Repeat group name for each leaf it spans; empty string for ungrouped. Length MUST equal periodHeaders[] length. For Equity statements: group headers span account sub-columns (e.g. 'Common Stock' spanning 'Number of Shares' and 'Amount').",
+              "items": {
+                "type": "string"
+              }
+            },
+            "rows": {
+              "type": "array",
+              "description": "ALL data rows top-to-bottom as printed, merging across pages. EVERY row MUST have lineItem extracted — NEVER leave it blank. For Cash Flow statements: you MUST include ALL rows from ALL three sections (operating activities, investing activities, AND financing activities) PLUS reconciliation and supplemental rows. A typical Cash Flow has 50-80 rows. If you only have ~20 rows you are MISSING sections. Scan the ENTIRE table from top to bottom and extract EVERY row's label from the first column. For Equity statements: rows are transaction events read top-to-bottom (e.g. 'Balance as of December 31, 2023', 'Net income', 'Issuance of common stock', 'Dividends', 'Balance as of March 31, 2024'). The first column contains event labels, NOT account category names.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "lineItem": {
+                    "type": "string",
+                    "method": "extract",
+                    "description": "Row label from the FIRST column, verbatim. REQUIRED — never blank. Read the leftmost cell of every row. For Cash Flow tables this includes labels like 'Cash flows from investing activities:', 'Acquisitions of real estate', 'Proceeds from debt obligations', 'Cash flows from financing activities:', 'Dividends paid', etc. For Equity tables this includes transaction event labels like 'Balance as of December 31, 2023', 'Net income', 'Issuance of common stock', 'Stock-based compensation', 'Common stock dividends' — NOT account category names. If you see numeric values in a row, there MUST be a corresponding label in the first column — extract it."
+                  },
+                  "level": {
+                    "type": "string",
+                    "method": "classify",
+                    "enum": ["0", "1", "2", "3"],
+                    "description": "Indentation level: '0'=top section header or total, '1'=direct child, '2'=sub-child, '3'=deeper."
+                  },
+                  "isSectionHeader": {
+                    "type": "string",
+                    "method": "classify",
+                    "enum": ["true", "false"],
+                    "description": "'true' if this row is a section header (e.g. 'Cash flows from operating activities:'), 'false' otherwise."
+                  },
+                  "isSubtotal": {
+                    "type": "string",
+                    "method": "classify",
+                    "enum": ["true", "false"],
+                    "description": "'true' if this row is a subtotal or total line (e.g. 'Total assets', 'Net cash provided by operating activities'), 'false' otherwise."
+                  },
+                  "values": {
+                    "type": "array",
+                    "method": "extract",
+                    "description": "Cell values left-to-right, verbatim (keep '$', commas, parentheses, '—'). Length MUST equal periodHeaders[] length.",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": {
+    "purpose": "sec-financial-tables",
+    "version": "v2"
+  }
+}

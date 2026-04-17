@@ -9,8 +9,15 @@ __pycache__/
 # Temporary scripts
 _*.py
 
-# Email attachments (PDFs) — not redistributable
-email/
+# Email body (not needed)
+email/body.txt
+email/attachements/*.csv
+
+# Excel temp lock files
+~$*.xlsx
+
+# Raw CU API responses (14-34 MB each)
+output/v2/*_raw.json
 
 # C extensions
 *.so
