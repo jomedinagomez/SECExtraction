@@ -3,8 +3,18 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# IDE / editor
+.vscode/
+
+# Temporary scripts
+_*.py
+
+# Email attachments (PDFs) — not redistributable
+email/
+
 # C extensions
 *.so
+.env
 
 # Distribution / packaging
 .Python

@@ -1,0 +1,113 @@
+{
+  "description": "Extracts the five primary SEC consolidated financial statements (Balance Sheet, Statements of Operations/Income, Comprehensive Income, Changes in Equity, Cash Flows) while preserving visual hierarchy: section headers, indentation level, parent line item, subtotals, and per-period values. Handles multi-page tables: when a statement spans multiple pages (continuation with or without repeated headers, or multiple sub-tables for different periods), merge all parts into a SINGLE complete table with all rows. Explicitly excludes MD&A reconciliations, FFO/NOI tables, rent rolls, and other non-primary schedules.",
+  "baseAnalyzerId": "prebuilt-document",
+  "config": {
+    "returnDetails": true,
+    "enableLayout": true,
+    "estimateFieldSourceAndConfidence": true
+  },
+  "fieldSchema": {
+    "name": "SEC Financial Tables",
+    "fields": {
+      "financialTables": {
+        "type": "array",
+        "description": "Primary consolidated financial statement tables only. INCLUDE: Consolidated Balance Sheet(s), Consolidated Statements of Operations, Consolidated Statements of Income, Consolidated Statements of Comprehensive Income, Consolidated Statements of (Changes in) Stockholders' Equity, Consolidated Statements of Cash Flows. EXCLUDE: MD&A variance/comparison tables (e.g. 'Comparison of the Three Months Ended...'), FFO/NOI reconciliations, property-level operating metrics (rent rolls, lease expirations, customer concentration, capital expenditure rollforwards), debt schedules, segment breakdowns, notes-to-the-financial-statements detail tables, and any narrative/textual tables. MULTI-PAGE TABLE HANDLING: Financial statements often span multiple pages. You MUST merge all continuation parts into a SINGLE complete table entry. Specifically: (A) If a table is cut mid-flow and continues on the next page WITHOUT repeated headers, concatenate all rows into one table. (B) If a table continues on the next page WITH repeated column headers, ignore the repeated headers and concatenate the data rows into one table. (C) If a section contains multiple sub-tables with different column headers for different periods (e.g. Equity roll-forward with 'Nine months ended September 30, 2024' and 'Nine months ended September 30, 2023'), emit ONE array entry per sub-table — each with its own period caption, headers, and rows. NEVER emit incomplete or truncated tables. ALWAYS include ALL rows from the first row to the final total/balance row. BALANCE SHEET CLASSIFICATION: 'Stockholders' equity' or 'Equity' sections that appear WITHIN a Balance Sheet are part of the Balance Sheet — they are NOT separate Equity statements. Only standalone 'Statements of Changes in Stockholders' Equity' (roll-forward tables showing beginning balance, transactions, ending balance) are Equity statements.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "tableTitle": {
+              "type": "string",
+              "method": "extract",
+              "description": "The exact title or caption printed above the table, verbatim. For Equity roll-forward sub-tables, include both the statement title and the period caption (e.g. 'Consolidated Statements of Equity — Nine months ended September 30, 2024')."
+            },
+            "companyName": {
+              "type": "string",
+              "method": "extract",
+              "description": "Registrant name as printed above the table, verbatim (e.g. 'Safehold Inc.')."
+            },
+            "statementType": {
+              "type": "string",
+              "method": "classify",
+              "description": "Category of the financial statement. Choose exactly one based on the table title: CashFlow (Statements of Cash Flows), BalanceSheet (Balance Sheet / Statement of Financial Position — note: the 'Stockholders Equity' section that appears at the bottom of a Balance Sheet is PART of the Balance Sheet, NOT a separate Equity statement), IncomeStatement (Statements of Operations or Statements of Income - the primary income statement only, NEVER MD&A variance tables or FFO/NOI reconciliations), ComprehensiveIncome (Statements of Comprehensive Income), Equity (ONLY standalone Statements of Changes in Stockholders' Equity — roll-forward tables showing opening balance, period transactions like net income/dividends/stock comp, and closing balance), Other (anything that is not one of the five primary statements).",
+              "enum": [
+                "CashFlow",
+                "BalanceSheet",
+                "IncomeStatement",
+                "ComprehensiveIncome",
+                "Equity",
+                "Other"
+              ]
+            },
+            "unit": {
+              "type": "string",
+              "method": "extract",
+              "description": "Reporting unit as printed, verbatim (e.g. 'thousands', 'millions', 'thousands, except per share data')."
+            },
+            "periodHeaders": {
+              "type": "array",
+              "method": "extract",
+              "description": "LEAF (bottom-most) column headers left-to-right in the EXACT order they appear on the page. One entry per value column. Do not include the line-item label column. For most statements these are period/year labels (e.g. '2024','2023'). For Equity roll-forward sub-tables, these are the equity component column names in left-to-right physical order (e.g. 'Number of Shares','Amount','Additional Paid-in Capital','Common Shares Held in Deferred Compensation Plan','Deferred Compensation Plan','Retained Earnings','Total'). Values in each row MUST follow this same column order.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "periodGroupHeaders": {
+              "type": "array",
+              "method": "extract",
+              "description": "SPANNING header printed above each corresponding leaf column, exactly as printed. Repeat the same group string for every leaf it spans. ALWAYS populate this when the table has a two-level header structure. Examples: Income Statement with 'For the Three Months Ended September 30,' spanning 2024/2023 and 'For the Nine Months Ended September 30,' spanning 2024/2023 → ['For the Three Months Ended September 30,','For the Three Months Ended September 30,','For the Nine Months Ended September 30,','For the Nine Months Ended September 30,']. Equity roll-forward with 'Common Stock' spanning 'Number of Shares' and 'Amount' → ['Common Stock','Common Stock','','','','','']. Use empty string '' where no spanning header exists. Length MUST equal periodHeaders[] length, or be empty ONLY when the table truly has a single-level header (e.g. a Balance Sheet with just date columns).",
+              "items": {
+                "type": "string"
+              }
+            },
+            "rows": {
+              "type": "array",
+              "description": "ALL data rows in EXACT top-to-bottom document order, merging across pages if the table spans multiple pages. The table MUST be complete — from the first line item to the final total/balance row. For Cash Flow statements, this means ALL three sections (operating, investing, financing) PLUS the beginning/ending cash reconciliation rows. For Balance Sheets, this means ALL assets, ALL liabilities, AND the stockholders' equity section through 'Total liabilities and stockholders' equity'. For multi-page tables, concatenate rows from all continuation pages. NEVER truncate or omit rows. For Equity roll-forward sub-tables, start with the opening balance row, then each transaction row in order, then the quarter-end balance, then the next quarter's transactions, and so on. EVERY row MUST have a non-empty lineItem.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "lineItem": {
+                    "type": "string",
+                    "method": "extract",
+                    "description": "The row label from the first column, verbatim. REQUIRED for every row — never leave blank. Keep original casing and punctuation including trailing ':'. For Equity roll-forward tables, typical labels include 'Balance as of December 31, 2023', 'Net income', 'Issuance of common stock, net of issuance costs of $X', 'Stock-based compensation', 'Common stock dividends ($X.XX per share)', etc. Repeating labels across quarters (e.g. 'Net income' appearing in Q1, Q2, Q3) is expected and correct."
+                  },
+                  "level": {
+                    "type": "integer",
+                    "method": "generate",
+                    "description": "Indentation level from visual inspection: 0 = outermost section header or balance/total row, 1 = direct child or sub-section, 2/3/4 = deeper nesting. Subtotals share the level of their enclosing section header. FOR EQUITY ROLL-FORWARD TABLES: 'Balance as of ...' rows are level 0 (they are subtotals/totals). All activity rows between balance rows (Net income, Issuance of common stock, Stock-based compensation, Dividends, Forfeiture, Deposits, etc.) are level 1. ALWAYS assign levels for equity tables — do NOT leave them empty."
+                  },
+                  "parentLineItem": {
+                    "type": "string",
+                    "method": "generate",
+                    "description": "lineItem of the nearest enclosing section or sub-section header. Empty string for level-0 rows."
+                  },
+                  "isSectionHeader": {
+                    "type": "boolean",
+                    "method": "generate",
+                    "description": "True for section and sub-section header rows (e.g. 'Cash flows from operating activities:', 'Adjustments to reconcile net income to ...'). For Equity roll-forward tables, there are typically no section headers — set false for all rows. ALWAYS set this field for every row — do NOT leave it empty."
+                  },
+                  "isSubtotal": {
+                    "type": "boolean",
+                    "method": "generate",
+                    "description": "True if this row is a subtotal or total of the preceding indented block (e.g. 'Total assets', 'Net cash provided by operating activities', 'Balance, December 31, 2024'). FOR EQUITY ROLL-FORWARD TABLES: ALL 'Balance as of ...' rows are subtotals (isSubtotal=true). ALWAYS set this field for every row — do NOT leave it empty."
+                  },
+                  "values": {
+                    "type": "array",
+                    "method": "extract",
+                    "description": "Cell values left-to-right, verbatim as printed (keep '$', commas, parentheses for negatives, '—' for blanks). One entry per column in periodHeaders[]; length MUST equal periodHeaders[] length. For Equity roll-forward tables, each row's values correspond to equity component columns (shares, amounts, etc.).",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": {
+    "purpose": "sec-financial-tables",
+    "version": "v1"
+  }
+}

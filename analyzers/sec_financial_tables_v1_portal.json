@@ -1,0 +1,153 @@
+{
+  "description": "Portal-importable variant of sec_financial_tables_v1. Flattens the per-row 'values' array into up to 6 discrete string columns (value1..value6) so the Foundry portal import UI (which does not render array-of-object-containing-array schemas) can accept it. Functionally equivalent for up to 6 period columns — covers every statement in the SAFE/BNL/TRNO sample set (max 6 cols on SAFE Equity).",
+  "baseAnalyzerId": "prebuilt-document",
+  "config": {
+    "returnDetails": true,
+    "enableLayout": true,
+    "estimateFieldSourceAndConfidence": true
+  },
+  "fieldSchema": {
+    "fields": {
+      "financialTables": {
+        "type": "array",
+        "method": "generate",
+        "description": "Primary consolidated financial statement tables only. INCLUDE: Consolidated Balance Sheet(s), Consolidated Statements of Operations, Consolidated Statements of Income, Consolidated Statements of Comprehensive Income, Consolidated Statements of (Changes in) Stockholders' Equity, Consolidated Statements of Cash Flows. EXCLUDE: MD&A variance/comparison tables (e.g. 'Comparison of the Three Months Ended...'), FFO/NOI reconciliations, property-level operating metrics (rent rolls, lease expirations, customer concentration, capital expenditure rollforwards), debt schedules, segment breakdowns, notes-to-the-financial-statements detail tables, and any narrative/textual tables. Return one array entry per primary statement.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "tableTitle": {
+              "type": "string",
+              "description": "The exact title printed above the table (e.g. 'Consolidated Statements of Cash Flows')."
+            },
+            "companyName": {
+              "type": "string",
+              "description": "Registrant name as printed above the table (e.g. 'Safehold Inc.')."
+            },
+            "statementType": {
+              "type": "string",
+              "description": "Category of the financial statement. Choose exactly one: CashFlow (Statements of Cash Flows), BalanceSheet (Balance Sheet / Statement of Financial Position), IncomeStatement (Statements of Operations or Statements of Income — the primary income statement only, NEVER MD&A variance tables or FFO/NOI reconciliations), ComprehensiveIncome (Statements of Comprehensive Income), Equity (Statements of (Changes in) Stockholders' Equity), Other (anything that is not one of the five primary statements).",
+              "enum": [
+                "CashFlow",
+                "BalanceSheet",
+                "IncomeStatement",
+                "ComprehensiveIncome",
+                "Equity",
+                "Other"
+              ]
+            },
+            "unit": {
+              "type": "string",
+              "description": "Reporting unit as printed (e.g. 'thousands', 'millions', 'thousands, except per share data')."
+            },
+            "periodGroup1": {
+              "type": "string",
+              "description": "Spanning/group header printed ABOVE periodHeader1 (e.g. 'Three Months Ended September 30,', 'Nine Months Ended September 30,', 'As of December 31,', 'Year Ended December 31,'). Empty string if there is no spanning header for this column or if the column is unused."
+            },
+            "periodGroup2": {
+              "type": "string",
+              "description": "Spanning/group header above periodHeader2. Repeat the same group string for every leaf column it spans (e.g. a 'Three Months Ended September 30,' group covering two year columns yields the same periodGroup value for both). Empty string if none."
+            },
+            "periodGroup3": {
+              "type": "string",
+              "description": "Spanning/group header above periodHeader3. Empty string if none."
+            },
+            "periodGroup4": {
+              "type": "string",
+              "description": "Spanning/group header above periodHeader4. Empty string if none."
+            },
+            "periodGroup5": {
+              "type": "string",
+              "description": "Spanning/group header above periodHeader5. Empty string if none."
+            },
+            "periodGroup6": {
+              "type": "string",
+              "description": "Spanning/group header above periodHeader6. Empty string if none."
+            },
+            "periodHeader1": {
+              "type": "string",
+              "description": "1st column header (leftmost). For most statements this is a fiscal period (e.g. '2024'). For Statements of Changes in Equity this is an equity component (e.g. 'Common Stock'). Empty string if fewer than 1 column."
+            },
+            "periodHeader2": {
+              "type": "string",
+              "description": "2nd column header. Empty string if fewer than 2 columns."
+            },
+            "periodHeader3": {
+              "type": "string",
+              "description": "3rd column header. Empty string if fewer than 3 columns."
+            },
+            "periodHeader4": {
+              "type": "string",
+              "description": "4th column header. Empty string if fewer than 4 columns."
+            },
+            "periodHeader5": {
+              "type": "string",
+              "description": "5th column header. Empty string if fewer than 5 columns."
+            },
+            "periodHeader6": {
+              "type": "string",
+              "description": "6th column header (rightmost). Empty string if fewer than 6 columns."
+            },
+            "rows": {
+              "type": "array",
+              "description": "Ordered list of rows, top-to-bottom. Infer hierarchy from visual indentation. Section headers often end with ':' (e.g. 'Cash flows from operating activities:') but may not (e.g. 'Operating activities'). Sub-section headers like 'Adjustments to reconcile net income to ...' and 'Changes in assets and liabilities' get level = (parent section level) + 1. Regular line items use level = (enclosing section level) + 1. Subtotal rows (e.g. 'Total assets', 'Net cash provided by operating activities', 'Balance, December 31, 2024') share the level of their enclosing section header. Preserve values exactly as printed: keep em-dashes, '$' signs, parentheses for negatives, and footnote markers. Populate value1..value6 in the same order as periodHeader1..periodHeader6, using an empty string for blank or absent cells.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "lineItem": {
+                    "type": "string",
+                    "description": "The row label from the first column, trimmed of leading/trailing whitespace. Keep original casing and punctuation including trailing ':'."
+                  },
+                  "level": {
+                    "type": "integer",
+                    "description": "Indentation level: 0 = outermost section header, 1 = direct child or sub-section, 2/3/4 = deeper nesting. Subtotals share the level of their enclosing section header."
+                  },
+                  "parentLineItem": {
+                    "type": "string",
+                    "description": "lineItem of the nearest enclosing section or sub-section header. Empty string for level-0 rows."
+                  },
+                  "isSectionHeader": {
+                    "type": "boolean",
+                    "description": "True for section and sub-section header rows."
+                  },
+                  "isSubtotal": {
+                    "type": "boolean",
+                    "description": "True if this row is a subtotal or total of the preceding indented block."
+                  },
+                  "value1": {
+                    "type": "string",
+                    "description": "Value under periodHeader1, preserved exactly as printed (em-dash, '$', parentheses, footnote markers). Empty string for blank cells."
+                  },
+                  "value2": {
+                    "type": "string",
+                    "description": "Value under periodHeader2, preserved exactly as printed. Empty string for blank cells."
+                  },
+                  "value3": {
+                    "type": "string",
+                    "description": "Value under periodHeader3, preserved exactly as printed. Empty string for blank cells."
+                  },
+                  "value4": {
+                    "type": "string",
+                    "description": "Value under periodHeader4, preserved exactly as printed. Empty string for blank cells."
+                  },
+                  "value5": {
+                    "type": "string",
+                    "description": "Value under periodHeader5, preserved exactly as printed. Empty string for blank cells."
+                  },
+                  "value6": {
+                    "type": "string",
+                    "description": "Value under periodHeader6, preserved exactly as printed. Empty string for blank cells."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": {
+    "purpose": "sec-financial-tables",
+    "variant": "portal-flat",
+    "version": "v1"
+  }
+}
