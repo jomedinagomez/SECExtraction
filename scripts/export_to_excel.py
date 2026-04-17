@@ -92,6 +92,7 @@ def _normalize_table(raw_tbl: dict[str, Any]) -> dict[str, Any]:
     # Column headers: flat wins if any periodHeader1 exists
     period_headers: list[str] = []
     period_groups: list[str] = []
+    raw_group_count = 0
     if "periodHeader1" in tbl_obj:
         for i in range(1, MAX_FLAT_COLS + 1):
             h = str(_scalar(tbl_obj.get(f"periodHeader{i}"))).strip()
@@ -102,6 +103,7 @@ def _normalize_table(raw_tbl: dict[str, Any]) -> dict[str, Any]:
         while period_headers and not period_headers[-1] and not period_groups[-1]:
             period_headers.pop()
             period_groups.pop()
+        raw_group_count = len(period_groups)  # flat schema: already 1:1
     else:
         period_headers = [
             str(_scalar(h)).strip() for h in _array(tbl_obj.get("periodHeaders"))
@@ -110,6 +112,8 @@ def _normalize_table(raw_tbl: dict[str, Any]) -> dict[str, Any]:
             str(_scalar(g)).strip()
             for g in _array(tbl_obj.get("periodGroupHeaders"))
         ]
+        # Track original group count before padding (for header reorder fix)
+        raw_group_count = len(period_groups)
         # Pad groups to match headers length
         if len(period_groups) < len(period_headers):
             period_groups += [""] * (len(period_headers) - len(period_groups))
@@ -160,18 +164,112 @@ def _normalize_table(raw_tbl: dict[str, Any]) -> dict[str, Any]:
         "rows": rows_norm,
     }
 
-    # Post-process: infer hierarchy for Equity rollforward tables when CU
-    # returns all-zero levels (known gap in CU output).
-    if stype == "Equity" and rows_norm and all(r["level"] == 0 for r in rows_norm):
-        _BALANCE_RE = re.compile(r"^balance\b", re.IGNORECASE)
-        for row in rows_norm:
-            if _BALANCE_RE.match(row["lineItem"]):
-                row["level"] = 0
-                row["isSubtotal"] = True
-            else:
-                row["level"] = 1
+    # Post-process: fix known CU ordering issues
+    _fix_header_order(result, raw_group_count)
+    _fix_row_order(result)
 
     return result
+
+
+def _fix_header_order(table: dict[str, Any], raw_group_count: int) -> None:
+    """Fix CU bug where grouped sub-columns are pushed to the end of periodHeaders.
+
+    CU sometimes returns periodGroupHeaders with fewer entries than periodHeaders,
+    mapping groups to the LAST N headers instead of the first. When that happens
+    the values are already in correct physical left-to-right order, so we rotate
+    headers (and corresponding values) to put grouped columns first.
+
+    Detection: raw CU periodGroupHeaders count < periodHeaders count AND
+    all raw group entries are non-empty (representing actual spanning headers).
+    """
+    hdrs = table["periodHeaders"]
+    n_hdrs = len(hdrs)
+
+    # Only applies when CU returned fewer groups than headers
+    if raw_group_count == 0 or raw_group_count >= n_hdrs:
+        return
+    # All raw group entries must be non-empty
+    grps = table["periodGroups"]
+    if not all(g.strip() for g in grps[:raw_group_count]):
+        return
+
+    # The grouped columns are at the END of hdrs but should be at the START.
+    # Values are already in correct physical left-to-right order (grouped cols first),
+    # so we only rotate the headers to match, NOT the values.
+    grouped_hdrs = hdrs[-raw_group_count:]
+    ungrouped_hdrs = hdrs[:-raw_group_count]
+    new_hdrs = grouped_hdrs + ungrouped_hdrs
+    new_grps = grps[:raw_group_count] + [""] * len(ungrouped_hdrs)
+
+    table["periodHeaders"] = new_hdrs
+    table["periodGroups"] = new_grps
+
+
+def _fix_row_order(table: dict[str, Any]) -> None:
+    """Fix CU bug where child rows are displaced from their parent section header.
+
+    CU sometimes returns all L1 rows first, then all L2 rows (sorted by level
+    instead of document order). We reorder so that each section header is
+    immediately followed by its children (rows at a deeper level) before the
+    next sibling at the same or shallower level.
+
+    Algorithm: scan rows for section headers. For each header at level L, collect
+    all children (level > L) that reference it (by parentLineItem) or that are
+    currently displaced (appear after other L-level siblings). Reinsert them
+    right after the header.
+    """
+    rows = table["rows"]
+    if len(rows) < 3:
+        return
+
+    # Build a map: header lineItem -> list of child row indices (by parentLineItem)
+    header_children: dict[str, list[int]] = {}
+    header_indices: dict[str, int] = {}
+    for i, row in enumerate(rows):
+        if row["isSectionHeader"]:
+            header_children[row["lineItem"]] = []
+            header_indices[row["lineItem"]] = i
+        parent = row.get("parentLineItem", "")
+        if parent and parent in header_children:
+            header_children[parent].append(i)
+
+    # Check if any header's children are non-contiguous (displaced)
+    needs_fix = False
+    for hdr_name, child_idxs in header_children.items():
+        if not child_idxs:
+            continue
+        hdr_idx = header_indices[hdr_name]
+        # Children should be at positions hdr_idx+1, hdr_idx+2, ...
+        expected_start = hdr_idx + 1
+        for offset, ci in enumerate(child_idxs):
+            if ci != expected_start + offset:
+                needs_fix = True
+                break
+        if needs_fix:
+            break
+
+    if not needs_fix:
+        return
+
+    # Rebuild row list: for each header, pull its children right after it
+    placed = set()
+    new_rows = []
+
+    def _place_row(idx: int) -> None:
+        if idx in placed:
+            return
+        placed.add(idx)
+        row = rows[idx]
+        new_rows.append(row)
+        # If this is a header, place its children immediately after
+        if row["isSectionHeader"] and row["lineItem"] in header_children:
+            for ci in header_children[row["lineItem"]]:
+                _place_row(ci)
+
+    for i in range(len(rows)):
+        _place_row(i)
+
+    table["rows"] = new_rows
 
 
 def load_document(json_path: Path) -> list[dict[str, Any]]:
