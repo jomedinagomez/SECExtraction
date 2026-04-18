@@ -388,7 +388,7 @@ def extract_pdf(
     tables = [_normalize_table(t, paragraphs) for t in raw_tables]
     tables = [t for t in tables if t]
     if not keep_other:
-        # Drop non-primary tables to cut noise (customer cares about the 5 primaries).
+        # Drop non-primary tables to keep output focused on the 5 primary financial statements.
         primary = [t for t in tables if t["statementType"] != "Other"]
         if primary:
             tables = primary
